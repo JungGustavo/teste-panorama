@@ -4,6 +4,8 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { useUnidades } from '@/hooks/useUnidades'
 import { useSdgJustificativas } from '@/hooks/useSdgJustificativas'
+import { opcoesNegocioSplit, unidadeSplitNegocio } from '@/lib/rv-gente'
+import { normalizarNomeUnidade } from '@/lib/unidade-resolver'
 import { SDG_INDICADORES } from '@/lib/sdg-indicadores'
 import { comprimirImagem } from '@/lib/comprimir-imagem'
 import { Card } from '@/components/ui/card'
@@ -155,6 +157,16 @@ function CardAssuntosGerais({ texto, salvando, onChange, onSalvar }: CardAssunto
  * por indicador × mês) — escrita aqui pela própria unidade (ou pelo admin em
  * nome dela) antes da reunião, e só exibida (read-only) no modo apresentação
  * (`/sdg-financeiro`).
+ *
+ * Unidade com 2 gerentes reais (Camaçari: CDL=Rota/CDR=Armazém; Ponta
+ * Grossa: Empurrada/Armazém) ganha um seletor extra de Negócio (mesma régua
+ * de `opcoesNegocioSplit` já usada no Resumo Executivo do SDG Gerentes) —
+ * cada negócio grava sua própria linha em `sdg_justificativas`
+ * (migration_132, reaproveitada aqui) e seu próprio print (prefixo do
+ * negócio no path do Storage, pra não os dois gerentes sobrescreverem o
+ * mesmo arquivo). Sem trava por perfil (diferente do SDG Gerentes) — quem
+ * preenche aqui são lideranças de setor, não os gerentes de negócio, então
+ * qualquer um escolhe livremente Consolidado/Rota/Armazém/Empurrada.
  */
 export function JustificativasSdgTab() {
   const { toast } = useToast()
@@ -173,7 +185,24 @@ export function JustificativasSdgTab() {
     if (inicial) setSelUnidade(inicial)
   }, [unidadesFiltro, isAdmin, minhaUnidade, selUnidade])
 
-  const { porIndicador, loading, recarregar } = useSdgJustificativas(selUnidade, ano, mes)
+  const nomeUnidadeSel = unidades.find(u => u.codigo === selUnidade)?.nome ?? selUnidade
+
+  const opcoesNegocio = useMemo(() => {
+    if (!unidadeSplitNegocio(selUnidade, nomeUnidadeSel)) return null
+    const opcoes = opcoesNegocioSplit(selUnidade, nomeUnidadeSel)
+    return normalizarNomeUnidade(nomeUnidadeSel).includes('CAMACARI')
+      ? opcoes.map(o => ({ valor: o.valor, label: o.valor === 'ROTA' ? 'CDL Camaçari' : 'CDR Bahia' }))
+      : opcoes
+  }, [selUnidade, nomeUnidadeSel])
+
+  const [selNegocio, setSelNegocio] = useState('')
+  useEffect(() => {
+    if (!opcoesNegocio) { setSelNegocio(''); return }
+    if (!opcoesNegocio.some(o => o.valor === selNegocio)) setSelNegocio(opcoesNegocio[0].valor)
+  }, [opcoesNegocio, selNegocio])
+  const negocioEfetivo = opcoesNegocio ? selNegocio : 'CONS'
+
+  const { porIndicador, loading, recarregar } = useSdgJustificativas(selUnidade, ano, mes, negocioEfetivo)
 
   const [rascunhos, setRascunhos] = useState<Partial<Record<SdgIndicador, Rascunho>>>({})
   useEffect(() => {
@@ -190,12 +219,12 @@ export function JustificativasSdgTab() {
 
   async function salvar(indicador: SdgIndicador) {
     const rascunho = rascunhos[indicador]
-    if (!rascunho || !selUnidade) return
+    if (!rascunho || !selUnidade || (opcoesNegocio && !negocioEfetivo)) return
     setSalvando(indicador)
     const { error } = await supabase.from('sdg_justificativas').upsert(
       {
         unidade: selUnidade,
-        negocio: 'CONS',
+        negocio: negocioEfetivo,
         ano,
         mes,
         indicador,
@@ -214,7 +243,7 @@ export function JustificativasSdgTab() {
   }
 
   async function enviarPrint(indicador: SdgIndicador, file: File) {
-    if (!selUnidade) return
+    if (!selUnidade || (opcoesNegocio && !negocioEfetivo)) return
     if (file.type !== 'image/jpeg' && file.type !== 'image/png') {
       toast({ title: 'Formato inválido', description: 'Só aceita imagens JPEG ou PNG.', variant: 'destructive' })
       return
@@ -222,7 +251,10 @@ export function JustificativasSdgTab() {
     setEnviandoPrint(indicador)
     try {
       const comprimida = await comprimirImagem(file)
-      const path = `${selUnidade}/${ano}-${mes}-${indicador}.jpg`
+      // Prefixo do negócio no path — senão os dois gerentes de uma unidade
+      // split (ex: CDL/CDR) sobrescreveriam o mesmo arquivo no Storage pro
+      // mesmo indicador/mês, mesmo com linhas separadas em sdg_justificativas.
+      const path = `${selUnidade}/${negocioEfetivo}-${ano}-${mes}-${indicador}.jpg`
       const { error: erroUpload } = await supabase.storage
         .from('sdg-prints')
         .upload(path, comprimida, { upsert: true, contentType: 'image/jpeg' })
@@ -232,7 +264,7 @@ export function JustificativasSdgTab() {
       const { error: erroUpsert } = await supabase.from('sdg_justificativas').upsert(
         {
           unidade: selUnidade,
-          negocio: 'CONS',
+          negocio: negocioEfetivo,
           ano,
           mes,
           indicador,
@@ -270,8 +302,6 @@ export function JustificativasSdgTab() {
     }
   }
 
-  const nomeUnidadeSel = unidades.find(u => u.codigo === selUnidade)?.nome ?? selUnidade
-
   return (
     <div className="space-y-6">
       <p className="max-w-2xl text-sm text-muted-foreground">
@@ -296,6 +326,17 @@ export function JustificativasSdgTab() {
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">Unidade</Label>
             <p className="flex h-9 items-center text-sm font-medium text-foreground">{nomeUnidadeSel}</p>
+          </div>
+        )}
+        {opcoesNegocio && (
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Negócio</Label>
+            <Select value={selNegocio} onValueChange={setSelNegocio}>
+              <SelectTrigger className="w-40"><SelectValue placeholder="Negócio" /></SelectTrigger>
+              <SelectContent>
+                {opcoesNegocio.map(o => <SelectItem key={o.valor} value={o.valor}>{o.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
         )}
         <div className="space-y-1.5">

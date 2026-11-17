@@ -31,7 +31,7 @@ const ULTIMO_ANO_DRE_REALIZADO_ESTRUTURA_ANTIGA = 2025
  * Farol com código ≥ 035 (EBITDA 233, Geração de Caixa 276, Despesa
  * Administrativa 158 etc.) lê a conta errada pra 2025 pra trás.
  */
-function codigoDreNumeracaoAtual(codigo: string, ano: number): string {
+export function codigoDreNumeracaoAtual(codigo: string, ano: number): string {
   if (ano > ULTIMO_ANO_DRE_REALIZADO_ESTRUTURA_ANTIGA) return codigo
   const n = Number(codigo)
   if (!Number.isFinite(n) || n < 35 || n > 282) return codigo
@@ -98,6 +98,21 @@ function somaRealizadoComSinal(rows: DreLongoRow[], prefixos: string[]): number 
   return rows
     .filter(r => startsWithAny(codigoDreNumeracaoAtual(r.conta_codigo, r.ano), prefixos))
     .reduce((acc, r) => acc + (r.realizado ?? 0), 0)
+}
+
+/**
+ * Uma linha BRUTA de `vw_dre_longo` pertence a um dos `contas` (prefixos) —
+ * traduzindo o código pra numeração ATUAL antes de comparar
+ * (`codigoDreNumeracaoAtual`), já que o `conta_codigo` bruto de anos <= 2025
+ * ainda vem na numeração ANTIGA. Usada em todo filtro que seleciona linhas
+ * BRUTAS por conta antes de normalizar (`somaReal`/`normalizarParaCalculo` já
+ * fazem essa tradução sozinhos, mas só depois que a linha já foi
+ * selecionada) — sem isso, qualquer `contas` com código >= 035 (ex: Redução
+ * de Custos, que usa a numeração nova) nunca bate contra o ano anterior,
+ * trazendo 0 em vez do REALIZADO de verdade.
+ */
+export function linhaBrutaBateContas(row: DreLongoRow, contas: string[]): boolean {
+  return startsWithAny(codigoDreNumeracaoAtual(row.conta_codigo, row.ano), contas)
 }
 
 /** Soma de REAL para contas que começam com "002" (Receita Líquida Operacional). */
@@ -620,13 +635,13 @@ export function somaRealAnoAnteriorComMedia(
   if (ehIntervaloDesdeInicio) {
     const ultimoMes = mesesOrdenados[mesesOrdenados.length - 1]
     const linhaAcumulado = rowsNegocio.filter(r =>
-      r.tipo_periodo === 'ACUMULADO_ANO' && r.ano === ano && r.mes === ultimoMes && contas.some(c => r.conta_codigo.startsWith(c)),
+      r.tipo_periodo === 'ACUMULADO_ANO' && r.ano === ano && r.mes === ultimoMes && linhaBrutaBateContas(r, contas),
     )
     if (linhaAcumulado.length > 0) return somaReal(normalizarParaCalculo(linhaAcumulado), contas)
   }
 
   const linhasOperacionais = rowsNegocio.filter(r =>
-    r.tipo_periodo === 'MENSAL' && r.ano === ano && r.mes >= mesEntrada && contas.some(c => r.conta_codigo.startsWith(c)),
+    r.tipo_periodo === 'MENSAL' && r.ano === ano && r.mes >= mesEntrada && linhaBrutaBateContas(r, contas),
   )
   const mesesComDado = Array.from(new Set(linhasOperacionais.map(r => r.mes)))
   if (mesesComDado.length === 0) return null
@@ -662,6 +677,31 @@ export function calcularIncrementoUnidadesNovas(unidades: UnidadeIncremento[], a
   }, 0)
 }
 
+/** Unidade sem NENHUM histórico no `ano` informado (entrou dentro dele) — diferente de uma que já entrou em ano anterior e só tem o primeiro ano parcial. */
+export function unidadeNovaNoAno(dataEntrada: string | null, ano: number): boolean {
+  if (!dataEntrada) return false
+  return Number(dataEntrada.split('-')[0]) === ano
+}
+
+/**
+ * Soma do REAL do PRÓPRIO `ano` (mesmos `contas`/`meses` do card), só das
+ * unidades de `unidades` que entraram DENTRO desse `ano` (`unidadeNovaNoAno`)
+ * — usada pra EXCLUIR o número atual dessas unidades do Redução de Custos
+ * consolidado da AMBEV: a entrada delas não era prevista na meta, e não
+ * existe ano anterior justo pra comparar (diferente de uma unidade que
+ * entrou no meio do ano ANTERIOR, essa sim já tem a média estimada somada
+ * via `calcularIncrementoUnidadesNovas`) — pedido explícito do usuário pra
+ * não penalizar o consolidado com uma entrada que ele não previu.
+ */
+export function calcularExclusaoUnidadesNovas(unidades: UnidadeIncremento[], ano: number, contas: string[], meses: number[]): number {
+  return unidades
+    .filter(u => unidadeNovaNoAno(u.dataEntrada, ano))
+    .reduce((acc, u) => {
+      const rows = u.rows.filter(r => r.tipo_periodo === 'MENSAL' && r.ano === ano && meses.includes(r.mes))
+      return acc + somaReal(normalizarParaCalculo(rows), contas)
+    }, 0)
+}
+
 /**
  * Acompanhamento mensal pra um card de Redução de Custos (-15% vs ano
  * anterior): em cada mês, o REALIZADO (R$) do ano atual contra a meta do
@@ -683,11 +723,12 @@ export function calcularSerieReducaoCustos(
   const meses = Array.from(new Set(mensalAtual.map(r => r.mes))).sort((a, b) => a - b)
 
   return meses.map(mes => {
-    const realizadoAtual = somaReal(normalizarParaCalculo(mensalAtual.filter(r => r.mes === mes)), contas)
+    const realizadoAtualBruto = somaReal(normalizarParaCalculo(mensalAtual.filter(r => r.mes === mes)), contas)
+    const exclusao = calcularExclusaoUnidadesNovas(unidadesIncremento, ano, contas, [mes])
     const realizadoAnterior = somaRealAnoAnteriorComMedia(rowsNegocio, dataEntrada, ano - 1, contas, [mes])
     const incremento = calcularIncrementoUnidadesNovas(unidadesIncremento, ano - 1, contas, [mes])
     const meta = realizadoAnterior === null ? null : (realizadoAnterior + incremento) * 0.85
-    return { mes, avr: realizadoAtual, meta }
+    return { mes, avr: realizadoAtualBruto - exclusao, meta }
   })
 }
 
@@ -722,7 +763,8 @@ export function calcularSerieCapturaReducaoCustos(
 
   const realizadoPorMes = new Map(mesesRealizados.map(mes => {
     const calc = normalizarParaCalculo(mensalAtual.filter(r => r.mes === mes))
-    return [mes, somaReal(calc, contas)] as const
+    const exclusao = calcularExclusaoUnidadesNovas(unidadesIncremento, ano, contas, [mes])
+    return [mes, somaReal(calc, contas) - exclusao] as const
   }))
 
   const ultimoMes = mesesRealizados[mesesRealizados.length - 1]
@@ -777,19 +819,21 @@ export function calcularEvolucaoReducaoCustos(
   const mesesRealizados = Array.from(new Set(mensalAtual.map(r => r.mes))).sort((a, b) => a - b)
 
   const meses: PontoEvolucaoReducao[] = mesesRealizados.map(mes => {
-    const realAtual = somaReal(normalizarParaCalculo(mensalAtual.filter(r => r.mes === mes)), contas)
+    const realAtualBruto = somaReal(normalizarParaCalculo(mensalAtual.filter(r => r.mes === mes)), contas)
+    const exclusao = calcularExclusaoUnidadesNovas(unidadesIncremento, ano, contas, [mes])
     const incremento = calcularIncrementoUnidadesNovas(unidadesIncremento, ano - 1, contas, [mes])
     const realAnterior = (somaRealAnoAnteriorComMedia(rowsUnidade, dataEntrada, ano - 1, contas, [mes]) ?? 0) + incremento
-    return { mes, resultado: calcularReducaoCustos(realAtual, realAnterior) }
+    return { mes, resultado: calcularReducaoCustos(realAtualBruto - exclusao, realAnterior) }
   })
 
   if (mesesRealizados.length === 0) return { meses, anual: null }
 
   const ultimoMes = mesesRealizados[mesesRealizados.length - 1]
   const mesesAno = Array.from({ length: ultimoMes }, (_, i) => i + 1)
-  const realAtualAno = somaRealAnoAnteriorComMedia(rowsUnidade, null, ano, contas, mesesAno) ?? 0
+  const realAtualAnoBruto = somaRealAnoAnteriorComMedia(rowsUnidade, null, ano, contas, mesesAno) ?? 0
+  const exclusaoAno = calcularExclusaoUnidadesNovas(unidadesIncremento, ano, contas, mesesAno)
   const incrementoAno = calcularIncrementoUnidadesNovas(unidadesIncremento, ano - 1, contas, mesesAno)
   const realAnteriorAno = (somaRealAnoAnteriorComMedia(rowsUnidade, dataEntrada, ano - 1, contas, mesesAno) ?? 0) + incrementoAno
 
-  return { meses, anual: calcularReducaoCustos(realAtualAno, realAnteriorAno) }
+  return { meses, anual: calcularReducaoCustos(realAtualAnoBruto - exclusaoAno, realAnteriorAno) }
 }

@@ -20,8 +20,8 @@ import {
 import {
   avrPorPrefixo, calcularEstouroZero, calcularEvolucaoReducaoCustos, calcularImpactoFinanceiro,
   calcularIncrementoUnidadesNovas, calcularReceita, calcularReducaoCustos, calcularSemaforo, calcularSerieAnual,
-  calcularSerieCaptura, calcularSerieCapturaReducaoCustos, calcularSerieReducaoCustos, normalizarParaCalculo,
-  somaReal, somaRealAnoAnteriorComMedia,
+  calcularSerieCaptura, calcularSerieCapturaReducaoCustos, calcularSerieReducaoCustos, linhaBrutaBateContas,
+  normalizarParaCalculo, somaReal, somaRealAnoAnteriorComMedia, unidadeNovaNoAno,
 } from '@/lib/farol-calculations'
 import type { UnidadeIncremento } from '@/lib/farol-calculations'
 import { buscarMetaOrcamento } from '@/lib/orcamento-farol'
@@ -223,20 +223,34 @@ export function FarolDeMetasPage() {
     )
   }
 
-  function rowsParaReducao(ano: number, contas: string[], mesLimite: number): DreLongoRow[] {
+  function rowsParaReducaoDe(rows: DreLongoRow[], ano: number, contas: string[], mesLimite: number): DreLongoRow[] {
     // 1º semestre com julho+ já importado: o acumulado do banco passou de junho,
     // então reconstrói somando os meses Jan..mesLimite.
     if (periodo === 's1' && (mesAcumMax ?? 0) > 6) {
-      return rowsNegocio.filter(r =>
-        r.tipo_periodo === 'MENSAL' && r.ano === ano && r.mes <= mesLimite
-        && contas.some(c => r.conta_codigo.startsWith(c)),
+      return rows.filter(r =>
+        r.tipo_periodo === 'MENSAL' && r.ano === ano && r.mes <= mesLimite && linhaBrutaBateContas(r, contas),
       )
     }
     const tipo = periodo === 'mensal' ? 'MENSAL' : 'ACUMULADO_ANO'
-    return rowsNegocio.filter(r =>
-      r.tipo_periodo === tipo && r.ano === ano && r.mes === mesLimite
-      && contas.some(c => r.conta_codigo.startsWith(c)),
+    return rows.filter(r =>
+      r.tipo_periodo === tipo && r.ano === ano && r.mes === mesLimite && linhaBrutaBateContas(r, contas),
     )
+  }
+  function rowsParaReducao(ano: number, contas: string[], mesLimite: number): DreLongoRow[] {
+    return rowsParaReducaoDe(rowsNegocio, ano, contas, mesLimite)
+  }
+
+  /**
+   * Soma, no mesmo período do card, do REAL das unidades de `unidadesIncremento`
+   * (só preenchido pra AMBEV) que entraram DENTRO do `ano` informado (sem
+   * nenhum ano anterior pra comparar) — subtraída do `realAtual` do
+   * consolidado, pra elas não contarem na meta da AMBEV (pedido do usuário:
+   * entrada não prevista, comparação injusta com o ano anterior).
+   */
+  function exclusaoUnidadesNovasReducao(ano: number, contas: string[], mesLimite: number): number {
+    return unidadesIncremento
+      .filter(u => unidadeNovaNoAno(u.dataEntrada, ano))
+      .reduce((acc, u) => acc + somaReal(normalizarParaCalculo(rowsParaReducaoDe(u.rows, ano, contas, mesLimite)), contas), 0)
   }
 
   function paraPainel(indicadores: ReturnType<typeof calcularIndicador>[]) {
@@ -261,7 +275,10 @@ export function FarolDeMetasPage() {
     if (selAno === null || !card) return { meses: [], linhas: [] }
 
     const linhasReais = unidadesDisponiveis
-      .filter(u => u.codigo !== 'AMBEV')
+      // Unidade que entrou DENTRO desse ano (sem nenhum ano anterior pra
+      // comparar) fica fora da tabela — entrada não prevista, comparação
+      // injusta (pedido do usuário).
+      .filter(u => u.codigo !== 'AMBEV' && !unidadeNovaNoAno(u.data_entrada, selAno))
       .map(u => {
         const rows = rowsTodasUnidades.filter(r => r.unidade === u.codigo && r.negocio === selNegocio)
         const evolucao = calcularEvolucaoReducaoCustos(rows, u.data_entrada, selAno, card.contas)
@@ -455,6 +472,7 @@ export function FarolDeMetasPage() {
                         : (selMes ?? 0)
                     const mesesComparar = periodo === 'mensal' ? [mesLimite] : Array.from({ length: mesLimite }, (_, i) => i + 1)
                     const realAtual = somaReal(normalizarParaCalculo(rowsParaReducao(selAno, card.contas, mesLimite)), card.contas)
+                      - exclusaoUnidadesNovasReducao(selAno, card.contas, mesLimite)
                     const realAnteriorBruto = somaRealAnoAnteriorComMedia(rowsNegocio, null, selAno - 1, card.contas, mesesComparar) ?? 0
                     const ajusteIndividual = (somaRealAnoAnteriorComMedia(rowsNegocio, dataEntradaUnidade, selAno - 1, card.contas, mesesComparar) ?? 0) - realAnteriorBruto
                     const extraAmbev = calcularIncrementoUnidadesNovas(unidadesIncremento, selAno - 1, card.contas, mesesComparar)

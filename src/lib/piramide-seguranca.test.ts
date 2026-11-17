@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { agruparPorClassificacao, agruparPorMes, contarSif, eventosGraves, ordenarPorSeveridade } from './piramide-seguranca'
-import type { RelatoSeguranca } from '@/types'
+import { acidenteParaRelato, agruparPorClassificacao, agruparPorMes, contarSif, eventosGraves, ordenarPorSeveridade } from './piramide-seguranca'
+import type { AcidenteSeguranca, RelatoSeguranca } from '@/types'
+
+function acidente(over: Partial<AcidenteSeguranca>): AcidenteSeguranca {
+  return {
+    numero_credit: 1, unidade: 'ARACAJU', data_ocorrencia: '2026-08-01', ano: 2026, mes: 8, tipo: 'FAI',
+    sif: false, sif_tipo: null, colaborador: null, funcao: null, ato: null, ocorrencia: null, ...over,
+  }
+}
 
 function relato(over: Partial<RelatoSeguranca>): RelatoSeguranca {
   return {
@@ -138,5 +145,65 @@ describe('contarSif', () => {
 
   it('lista vazia conta zero', () => {
     expect(contarSif([])).toBe(0)
+  })
+
+  it('SIF PRECURSOR (grafia do relatório ACIDENTES) conta igual SIF PERCUSOR', () => {
+    expect(contarSif([relato({ classificacao: 'FAI', sif: true, sif_tipo: 'SIF PRECURSOR' })])).toBe(1)
+  })
+})
+
+describe('acidenteParaRelato', () => {
+  it('converte pro formato de RelatoSeguranca, com origem "acidente"', () => {
+    const a = acidente({ numero_credit: 3575404118, unidade: 'DIADEMA', tipo: 'FAI', ocorrencia: 'Descrição livre' })
+    expect(acidenteParaRelato(a)).toMatchObject({
+      relato_id: 3575404118, unidade: 'DIADEMA', classificacao: 'FAI', detalhamento: 'Descrição livre', origem: 'acidente',
+    })
+  })
+
+  it('"INCIDENTES" (plural, como vem do relatório) normaliza pra "INCIDENTE" — soma na mesma fileira do relatório RELATOS', () => {
+    expect(acidenteParaRelato(acidente({ tipo: 'INCIDENTES' })).classificacao).toBe('INCIDENTE')
+  })
+
+  it('"LTI FATL"/"LDI FATL" (as duas grafias) normaliza pra "FATAL"', () => {
+    expect(acidenteParaRelato(acidente({ tipo: 'LTI FATL' })).classificacao).toBe('FATAL')
+    expect(acidenteParaRelato(acidente({ tipo: 'LDI FATL' })).classificacao).toBe('FATAL')
+  })
+
+  it('FAI/LTI/MTI/MDI já batem direto com a classificação padrão, sem precisar traduzir', () => {
+    expect(acidenteParaRelato(acidente({ tipo: 'FAI' })).classificacao).toBe('FAI')
+    expect(acidenteParaRelato(acidente({ tipo: 'LTI' })).classificacao).toBe('LTI')
+    expect(acidenteParaRelato(acidente({ tipo: 'MTI' })).classificacao).toBe('MTI')
+    expect(acidenteParaRelato(acidente({ tipo: 'MDI' })).classificacao).toBe('MDI')
+  })
+})
+
+describe('eventosGraves — linhas de origem "acidente" (relatório ACIDENTES)', () => {
+  it('Incidente só entra com SIF Potencial — SIF Precursor não conta pra isso (só pro card de SIF)', () => {
+    const relatos = [
+      acidenteParaRelato(acidente({ numero_credit: 1, mes: 8, tipo: 'INCIDENTES', sif: true, sif_tipo: 'SIF POTENCIAL' })),
+      acidenteParaRelato(acidente({ numero_credit: 2, mes: 8, tipo: 'INCIDENTES', sif: true, sif_tipo: 'SIF PRECURSOR' })),
+      acidenteParaRelato(acidente({ numero_credit: 3, mes: 8, tipo: 'INCIDENTES', sif: false, sif_tipo: null })),
+    ]
+    expect(eventosGraves(relatos, 8).map(r => r.relato_id)).toEqual([1])
+  })
+
+  it('FAI, MTI, MDI e LTI entram sempre, mesmo sem nenhum SIF', () => {
+    const relatos = ['FAI', 'MTI', 'MDI', 'LTI'].map((tipo, i) =>
+      acidenteParaRelato(acidente({ numero_credit: i + 1, mes: 8, tipo, sif: false, sif_tipo: null })),
+    )
+    expect(eventosGraves(relatos, 8)).toHaveLength(4)
+  })
+
+  it('LTI FATL (vira FATAL) entra sempre, mesmo sem SIF', () => {
+    const relatos = [acidenteParaRelato(acidente({ numero_credit: 1, mes: 8, tipo: 'LTI FATL', sif: false, sif_tipo: null }))]
+    expect(eventosGraves(relatos, 8)).toHaveLength(1)
+  })
+
+  it('uma linha de ACIDENTES e uma de RELATOS no mesmo mês seguem cada uma a própria regra', () => {
+    const relatos: RelatoSeguranca[] = [
+      relato({ relato_id: 10, mes: 8, classificacao: 'INCIDENTE', sif: false, sif_tipo: null }), // RELATOS: Incidente sem SIF não entra
+      acidenteParaRelato(acidente({ numero_credit: 20, mes: 8, tipo: 'MTI', sif: false, sif_tipo: null })), // ACIDENTES: MTI entra sempre
+    ]
+    expect(eventosGraves(relatos, 8).map(r => r.relato_id)).toEqual([20])
   })
 })

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
+import { opcoesNegocioLabelCurto, unidadeSplitNegocio } from '@/lib/rv-gente'
 import { SDG_INDICADORES_GERENTES } from '@/lib/sdg-indicadores'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -49,12 +50,27 @@ interface PlanoAcaoFormDialogProps {
  * existir) em `resolverTagFinal`.
  */
 export function PlanoAcaoFormDialog({ open, onOpenChange, editando, isAdmin, minhaUnidade, unidades, tags, onSalvo, onTagCriada }: PlanoAcaoFormDialogProps) {
-  const { user, role } = useAuth()
+  const { user, role, rvNegocio } = useAuth()
   const { toast } = useToast()
   const [form, setForm] = useState(FORM_INICIAL)
   const [categoriaTag, setCategoriaTag] = useState<string>(SEM_TAG)
   const [indicadorGerentes, setIndicadorGerentes] = useState<SdgIndicador | ''>('')
+  const [negocio, setNegocio] = useState('CONS')
   const [salvando, setSalvando] = useState(false)
+
+  // Unidade com 2 gerentes reais (Camaçari: CDL=Rota/CDR=Armazém; Ponta
+  // Grossa: Empurrada/Armazém) ganha um seletor extra de Negócio — pra
+  // marcar que a ação é só de um dos dois (ex: só do CDR), ver migration_133.
+  // CONS (padrão) = ação da unidade como um todo, aparece pros dois.
+  const opcoesNegocio = useMemo(() => {
+    const unidadeFormObj = unidades.find(u => u.codigo === form.unidade)
+    if (!unidadeFormObj || !unidadeSplitNegocio(unidadeFormObj.codigo, unidadeFormObj.nome)) return null
+    return opcoesNegocioLabelCurto(unidadeFormObj.codigo, unidadeFormObj.nome)
+  }, [unidades, form.unidade])
+  // Gerente real (não-admin) de unidade com split cria a própria ação já
+  // travada no próprio negócio (mesmo `rvNegocio` que trava a apresentação) —
+  // admin escolhe livremente qual dos dois (ou CONS, pra unidade como um todo).
+  const negocioTravado = !isAdmin && opcoesNegocio ? rvNegocio : null
 
   // Tags "SDG Gerentes" ficam fora da lista normal do seletor de Categoria —
   // só aparecem via o 2º seletor (por indicador), não misturadas com Custos/
@@ -75,12 +91,25 @@ export function PlanoAcaoFormDialog({ open, onOpenChange, editando, isAdmin, min
       })
       setCategoriaTag(ehGerentes ? SDG_GERENTES : (editando.tag || SEM_TAG))
       setIndicadorGerentes(ehGerentes ? (tagAtual!.sdg_indicador as SdgIndicador) : '')
+      setNegocio(editando.negocio)
     } else {
       setForm({ ...FORM_INICIAL, unidade: isAdmin ? '' : (minhaUnidade ?? '') })
       setCategoriaTag(SEM_TAG)
       setIndicadorGerentes('')
+      setNegocio('CONS')
     }
   }, [open, editando, isAdmin, minhaUnidade, tags])
+
+  // Mantém `negocio` válido pra unidade atual do form: trava no próprio pra
+  // gerente real de unidade com split; admin fica livre, com CONS (ação da
+  // unidade como um todo) como default sempre válido — só muda pra CONS se
+  // o valor anterior não existir mais pra unidade nova (ex: trocou de
+  // Camaçari pra Ponta Grossa com "Rota" selecionado).
+  useEffect(() => {
+    if (!opcoesNegocio) { setNegocio('CONS'); return }
+    if (negocioTravado) { setNegocio(negocioTravado); return }
+    setNegocio(atual => (atual === 'CONS' || opcoesNegocio.some(o => o.valor === atual)) ? atual : 'CONS')
+  }, [opcoesNegocio, negocioTravado])
 
   /** Resolve a Categoria/indicador escolhidos pro nome de tag de verdade a gravar em `planos_acao.tag` — cria a tag "SDG Gerentes · X" na hora, na primeira vez que alguém usa aquele indicador. */
   async function resolverTagFinal(): Promise<string> {
@@ -119,6 +148,7 @@ export function PlanoAcaoFormDialog({ open, onOpenChange, editando, isAdmin, min
     }
     const payload = {
       unidade: form.unidade,
+      negocio: opcoesNegocio ? negocio : 'CONS',
       titulo,
       descricao: form.descricao.trim(),
       responsavel: form.responsavel.trim(),
@@ -168,6 +198,31 @@ export function PlanoAcaoFormDialog({ open, onOpenChange, editando, isAdmin, min
               <Label htmlFor="plano-prazo">Prazo</Label>
               <Input id="plano-prazo" type="date" value={form.prazo} onChange={e => setForm(f => ({ ...f, prazo: e.target.value }))} />
             </div>
+            {opcoesNegocio && (
+              negocioTravado ? (
+                <div className="space-y-1.5">
+                  <Label>Negócio</Label>
+                  <p className="flex h-9 items-center text-sm font-medium text-foreground">
+                    {opcoesNegocio.find(o => o.valor === negocioTravado)?.label ?? negocioTravado}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <Label>Negócio</Label>
+                  <Select value={negocio} onValueChange={setNegocio}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="CONS">Consolidado (os dois)</SelectItem>
+                      {opcoesNegocio.map(o => (
+                        <SelectItem key={o.valor} value={o.valor}>{o.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )
+            )}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="plano-titulo">Título</Label>

@@ -37,6 +37,25 @@ export function opcoesNegocioSplit(codigo: string, nome: string): { valor: strin
   return [primeiraOpcao, { valor: 'ARM', label: 'Armazém' }]
 }
 
+/**
+ * Mesmas opções de `opcoesNegocioSplit`, com o rótulo curto "CDL"/"CDR" pra
+ * Camaçari (em vez de "Rota"/"Armazém") — mesmo apelido já usado no seletor
+ * de Unidade do SDG Gerentes e no Resumo Executivo. Ponta Grossa mantém
+ * "Empurrada"/"Armazém" (não tem apelido curto equivalente).
+ */
+export function opcoesNegocioLabelCurto(codigo: string, nome: string): { valor: string; label: string }[] {
+  const opcoes = opcoesNegocioSplit(codigo, nome)
+  const norm = `${codigo} ${nome}`.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  if (!norm.includes('CAMACAR')) return opcoes
+  return opcoes.map(o => ({ valor: o.valor, label: o.valor === 'ROTA' ? 'CDL' : 'CDR' }))
+}
+
+/** Rótulo curto do negócio de um registro (Plano de Ação, Resumo Executivo etc.) — null pra 'CONS' (não é de um negócio específico, não precisa de rótulo). */
+export function rotuloNegocioSplit(codigo: string, nome: string, negocio: string): string | null {
+  if (negocio === 'CONS') return null
+  return opcoesNegocioLabelCurto(codigo, nome).find(o => o.valor === negocio)?.label ?? null
+}
+
 function tokensSetor(setor: string): string[] {
   return setor.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').split(/[^A-Z]+/)
 }

@@ -50,7 +50,13 @@ const DataContext = createContext<DataContextValue | null>(null)
  * cada F5). As colunas passadas não precisam ser uma chave única sozinhas —
  * só precisam, juntas, dar uma ordem estável e repetível pra paginação.
  */
-async function fetchPorUnidade<T>(tabela: string, codigosUnidades: string[], colunasOrdem: string[]): Promise<T[]> {
+async function fetchPorUnidade<T>(
+  tabela: string,
+  codigosUnidades: string[],
+  colunasOrdem: string[],
+  /** Mesmo corte que já existia só pro Orçamento (ver fetchOrcamentoPaginado abaixo) — nenhuma tela do app olha além de "ano atual - 2". */
+  anoMinimo?: number,
+): Promise<T[]> {
   const PAGE = 10000   // por unidade — não deveria nunca disparar na prática, é só precaução
   const CONCURRENT = 5
 
@@ -60,6 +66,7 @@ async function fetchPorUnidade<T>(tabela: string, codigosUnidades: string[], col
     let acabou = false
     while (!acabou) {
       let query = supabase.from(tabela).select('*').eq('unidade', codigo)
+      if (anoMinimo !== undefined) query = query.gte('ano', anoMinimo)
       for (const coluna of colunasOrdem) query = query.order(coluna, { ascending: true })
       const { data, error } = await query.range(pagina * PAGE, (pagina + 1) * PAGE - 1)
       if (error) throw error
@@ -128,7 +135,16 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     // Promise.allSettled, não Promise.all: uma busca falhar (estourar
     // timeout etc) não pode derrubar as outras junto.
     const [dreR, auxR, metasR, orcamentoR] = await Promise.allSettled([
-      fetchPorUnidade<DreLongoRow>('mv_dre_longo', codigosUnidades, ['negocio', 'ano', 'mes', 'tipo_periodo', 'conta_codigo']),
+      // Sem corte de ano, essa busca (de longe a mais pesada: todas as
+      // unidades × todas as contas × todos os meses × MENSAL/ACUMULADO_ANO ×
+      // negócio, desde o primeiro ano importado) cresce pra sempre e é o
+      // principal motivo do carregamento lento do app — mesmo corte do
+      // Orçamento abaixo (ano atual - 2), já que toda comparação "ano
+      // anterior" do Farol/Ranking/RV não passa disso.
+      fetchPorUnidade<DreLongoRow>(
+        'mv_dre_longo', codigosUnidades, ['negocio', 'ano', 'mes', 'tipo_periodo', 'conta_codigo'],
+        new Date().getFullYear() - 2,
+      ),
       fetchPorUnidade<PainelPerdasAux>('painel_perdas_aux', codigosUnidades, ['id']),
       fetchPorUnidade<MetaPerdas>('metas_perdas', codigosUnidades, ['id']),
       // Sem filtro de ano, essa busca (a única no cache global sem escopo por

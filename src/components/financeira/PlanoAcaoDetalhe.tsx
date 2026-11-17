@@ -12,6 +12,7 @@ import {
   STATUS_LABEL, STATUS_PILL, estaAtrasado, formatDataBr, formatDataHoraBr, statusPermitidos,
 } from '@/lib/plano-acao'
 import { buscarHistoricoPlano } from '@/hooks/usePlanosAcao'
+import { rotuloNegocioSplit } from '@/lib/rv-gente'
 import type { PlanoAcao, PlanoAcaoHistorico, PlanoAcaoStatus } from '@/types'
 
 interface PlanoAcaoDetalheProps {
@@ -97,7 +98,13 @@ export function PlanoAcaoDetalhe({ plano, isAdmin, nomesUnidades, onAtualizado, 
       </div>
 
       <div className="grid grid-cols-2 gap-4 rounded-lg border bg-muted/30 p-4 sm:grid-cols-3">
-        <InfoItem label="Unidade">{nomesUnidades[plano.unidade] ?? plano.unidade}</InfoItem>
+        <InfoItem label="Unidade">
+          {nomesUnidades[plano.unidade] ?? plano.unidade}
+          {(() => {
+            const rotulo = rotuloNegocioSplit(plano.unidade, nomesUnidades[plano.unidade] ?? plano.unidade, plano.negocio)
+            return rotulo ? ` — ${rotulo}` : ''
+          })()}
+        </InfoItem>
         <InfoItem label="Responsável">{plano.responsavel || '—'}</InfoItem>
         <InfoItem label="Status">
           <span className={cn('rounded-full px-2.5 py-0.5 text-xs font-semibold', STATUS_PILL[plano.status])}>

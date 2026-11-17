@@ -10,6 +10,8 @@ interface Props {
   planos: PlanoAcao[]
   tags: PlanoAcaoTag[]
   unidadeSel: string
+  /** CONS (padrão) | ROTA | ARM | EMP — negócio selecionado no cabeçalho da apresentação; ações CONS aparecem sempre, as de negócio específico (ex: CDR) só pro negócio selecionado (unidade com 2 gerentes reais, ver migration_133). */
+  negocio: string
 }
 
 /** Pílula de status desse slide — cores PRÓPRIAS (mais fortes que o padrão cinza/azul/âmbar do resto do Plano de Ação), pedido do usuário depois de ver a apresentação real: Pendente em vermelho, Em Andamento em amarelo (mesmo atrasado — o usuário não quer que atraso sobreponha essa cor), Concluído em verde. */
@@ -31,7 +33,7 @@ const LABEL_POR_INDICADOR = new Map(SDG_INDICADORES_GERENTES.map(i => [i.id, i.l
  * conceito de `SlidePlanoAcao.tsx`, `useUltimoFollowPorPlano`). Ordenada
  * como `SlidePlanoAcao.tsx`: atrasadas primeiro, depois por prazo.
  */
-export function SlidePlanoAcaoGerentes({ planos, tags, unidadeSel }: Props) {
+export function SlidePlanoAcaoGerentes({ planos, tags, unidadeSel, negocio }: Props) {
   const indicadorPorTagNome = useMemo(() => {
     const mapa = new Map<string, SdgIndicador>()
     for (const t of tags) {
@@ -42,7 +44,7 @@ export function SlidePlanoAcaoGerentes({ planos, tags, unidadeSel }: Props) {
 
   const linhas = useMemo(() => {
     return planos
-      .filter(p => p.unidade === unidadeSel && p.status !== 'validado')
+      .filter(p => p.unidade === unidadeSel && (p.negocio === 'CONS' || p.negocio === negocio) && p.status !== 'validado')
       .map(p => ({ plano: p, indicador: indicadorPorTagNome.get(p.tag) }))
       .filter((l): l is { plano: PlanoAcao; indicador: SdgIndicador } => l.indicador !== undefined)
       .sort((a, b) => {
@@ -51,7 +53,7 @@ export function SlidePlanoAcaoGerentes({ planos, tags, unidadeSel }: Props) {
         if (aAtrasado !== bAtrasado) return aAtrasado ? -1 : 1
         return a.plano.prazo.localeCompare(b.plano.prazo)
       })
-  }, [planos, unidadeSel, indicadorPorTagNome])
+  }, [planos, unidadeSel, negocio, indicadorPorTagNome])
 
   const { porPlano: followPorPlano } = useUltimoFollowPorPlano(useMemo(() => linhas.map(l => l.plano.id), [linhas]))
 

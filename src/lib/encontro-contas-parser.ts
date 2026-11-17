@@ -8,6 +8,9 @@ export interface ParsedEncontroContasRow {
   numeroChamado: string
   solicitante: string
   valor: number
+  /** Colunas opcionais "unidade"/"motivo" — texto cru da planilha, resolvido/casado depois (ver ImportacaoEcTab). null quando a coluna não veio na planilha ou a célula está vazia. */
+  unidadeNomeOriginal: string | null
+  motivoOriginal: string | null
 }
 
 export interface ParseEncontroContasResultado {
@@ -61,8 +64,10 @@ const HEADERS = ['DATA', 'DESCRICAO', 'VALOR']
 
 /**
  * Planilha de Importação do Encontro de Contas — colunas Data/Descrição/
- * Valor. A unidade NÃO vem da planilha (é atribuída depois, na aba
- * Tratativas — um EC pode ser de mais de uma unidade, aí se desmembra).
+ * Valor, mais "Unidade"/"Motivo" OPCIONAIS: quando a planilha já vem com
+ * elas preenchidas (ex: alguém já sabe a unidade/motivo de cada chamado),
+ * usa direto; senão funciona como sempre — fica pra atribuir depois na aba
+ * Tratativas (um EC pode ser de mais de uma unidade, aí se desmembra lá).
  * Descrição segue o padrão "EC - R14602322 - Nome do solicitante".
  */
 export function parseEncontroContasMatriz(matriz: unknown[][]): ParseEncontroContasResultado {
@@ -75,6 +80,8 @@ export function parseEncontroContasMatriz(matriz: unknown[][]): ParseEncontroCon
   const iData = header.findIndex(h => h === 'DATA')
   const iDescricao = header.findIndex(h => h === 'DESCRICAO')
   const iValor = header.findIndex(h => h === 'VALOR')
+  const iUnidade = header.findIndex(h => h === 'UNIDADE')
+  const iMotivo = header.findIndex(h => h === 'MOTIVO')
   if (iData === -1 || iDescricao === -1 || iValor === -1) {
     return { linhas: [], erros: [`Cabeçalho inválido — esperado colunas: ${HEADERS.join(', ')}`] }
   }
@@ -97,7 +104,13 @@ export function parseEncontroContasMatriz(matriz: unknown[][]): ParseEncontroCon
     if (valor === null) { erros.push(`Linha ${i + 1}: valor inválido ("${toStr(cols[iValor])}")`); continue }
     if (!match) { erros.push(`Linha ${i + 1}: descrição fora do padrão "EC - <chamado> - <nome>" ("${descricaoOriginal}")`); continue }
 
-    linhas.push({ data, descricaoOriginal, numeroChamado: match[1].toUpperCase(), solicitante: match[2].trim(), valor })
+    const unidadeNomeOriginal = iUnidade === -1 ? null : (toStr(cols[iUnidade]) || null)
+    const motivoOriginal = iMotivo === -1 ? null : (toStr(cols[iMotivo]) || null)
+
+    linhas.push({
+      data, descricaoOriginal, numeroChamado: match[1].toUpperCase(), solicitante: match[2].trim(), valor,
+      unidadeNomeOriginal, motivoOriginal,
+    })
   }
 
   return { linhas, erros }

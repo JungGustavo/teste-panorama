@@ -16,6 +16,7 @@ import { Toaster } from '@/components/ui/toaster'
 import { useToast } from '@/components/ui/use-toast'
 import { cn } from '@/lib/utils'
 import { STATUS_LABEL, STATUS_PILL, estaAtrasado, formatDataBr, hojeIso } from '@/lib/plano-acao'
+import { rotuloNegocioSplit } from '@/lib/rv-gente'
 import { PlanoAcaoDetalhe } from '@/components/financeira/PlanoAcaoDetalhe'
 import { PlanoAcaoFormDialog } from '@/components/financeira/PlanoAcaoFormDialog'
 import { CadastroTagsPlanoAcaoTab } from '@/components/financeira/CadastroTagsPlanoAcaoTab'
@@ -287,7 +288,15 @@ export function PlanoDeAcaoPage() {
                       onClick={() => setSelecionadoId(p.id)}
                       className="cursor-pointer"
                     >
-                      <TableCell className="text-sm font-medium">{nomesUnidades[p.unidade] ?? p.unidade}</TableCell>
+                      <TableCell className="text-sm font-medium">
+                        {nomesUnidades[p.unidade] ?? p.unidade}
+                        {(() => {
+                          const rotulo = rotuloNegocioSplit(p.unidade, nomesUnidades[p.unidade] ?? p.unidade, p.negocio)
+                          return rotulo && (
+                            <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">{rotulo}</span>
+                          )
+                        })()}
+                      </TableCell>
                       <TableCell className="max-w-[320px] truncate text-sm">{p.titulo}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">{p.responsavel || '—'}</TableCell>
                       <TableCell className={cn('text-sm', atrasado ? 'font-semibold text-red-600 dark:text-red-400' : 'text-muted-foreground')}>

@@ -76,7 +76,7 @@ export function SdgFinanceiroPage() {
   const { ecs } = useEncontroContas()
   const { planos } = usePlanosAcao()
   const { tags } = usePlanoAcaoTags()
-  const { porIndicador: justificativas } = useSdgJustificativas(selUnidade, selAno, selMes)
+  const { porIndicador: justificativas } = useSdgJustificativas(selUnidade, selAno, selMes, selNegocio)
 
   // Tags do Plano de Ação ligadas a cada indicador do SDG (ver
   // planos_acao_tags.sdg_indicador) — permite mostrar, em cada slide, só as
@@ -94,7 +94,13 @@ export function SdgFinanceiroPage() {
   function acoesDoIndicador(indicador: SdgIndicador): PlanoAcao[] {
     const nomes = tagsPorIndicador[indicador]
     if (!nomes) return []
-    return planos.filter(p => p.unidade === selUnidade && p.status !== 'validado' && nomes.has(p.tag))
+    // CONS sempre aparece (ação da unidade como um todo); ROTA/ARM/EMP só
+    // aparece pro negócio selecionado — unidade com 2 gerentes reais
+    // (Camaçari/Ponta Grossa) marca a ação de um negócio específico (ver
+    // migration_133) pra não misturar as ações de um gerente com as do outro.
+    return planos.filter(p =>
+      p.unidade === selUnidade && (p.negocio === 'CONS' || p.negocio === selNegocio) && p.status !== 'validado' && nomes.has(p.tag),
+    )
   }
 
   const nomeUnidade = unidades.find(u => u.codigo === selUnidade)?.nome ?? selUnidade
@@ -421,7 +427,9 @@ export function SdgFinanceiroPage() {
             {slideIdx === 11 && (
               <SlidePlanoAcao
                 planos={planos}
+                tags={tags}
                 unidadeSel={selUnidade}
+                negocio={selNegocio}
               />
             )}
             {slideIdx === 12 && (

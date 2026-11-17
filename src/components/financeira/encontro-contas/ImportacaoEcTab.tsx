@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { parseEncontroContasFile, type ParsedEncontroContasRow } from '@/lib/encontro-contas-parser'
 import { MODELO_ENCONTRO_CONTAS } from '@/lib/modelos-importacao'
+import { normalizarNomeUnidade, resolverUnidadeFlexivel } from '@/lib/unidade-resolver'
 import { BotaoModeloPlanilha } from '@/components/importacao/BotaoModeloPlanilha'
 import { FilePickerButton } from '@/components/importacao/FilePickerButton'
 import { Button } from '@/components/ui/button'
@@ -17,6 +18,12 @@ import { parseNumeroPtBr } from '@/lib/utils'
 import { MotivosCadastroDialog } from './MotivosCadastroDialog'
 import type { EncontroContas, EncontroContasMotivo, Unidade } from '@/types'
 
+/** Acha o motivo cadastrado cujo nome bate com o texto da planilha, ignorando maiúsculas/acentos — mesma tolerância do resolverUnidadeFlexivel pra unidade. */
+function resolverMotivo(nomeOriginal: string, motivos: EncontroContasMotivo[]): EncontroContasMotivo | undefined {
+  const alvo = normalizarNomeUnidade(nomeOriginal)
+  return motivos.find(m => normalizarNomeUnidade(m.nome) === alvo)
+}
+
 const BATCH_SIZE = 500
 
 interface ImportacaoEcTabProps {
@@ -29,13 +36,19 @@ interface ImportacaoEcTabProps {
 }
 
 /**
- * Importação (Etapa 4 do plano): planilha Data/Descrição/Valor — a Unidade
- * não vem daqui (é atribuída depois em Tratativas, um EC pode virar N
- * linhas de unidades diferentes via "Desmembrar"). Todo EC importado entra
- * como `pendente`. Avisa (não bloqueia) quando o número do chamado já
- * existe no banco, pra não reimportar a mesma planilha sem querer. O
- * cadastro de Motivos (admin) mora aqui — mais perto do fluxo de "cheguei
- * uma planilha nova" do que da tela de Tratativas.
+ * Importação (Etapa 4 do plano): planilha Data/Descrição/Valor, mais
+ * Unidade/Motivo OPCIONAIS (colunas "unidade"/"motivo" — quando vêm
+ * preenchidas na planilha, cada EC já entra com elas; senão fica como
+ * sempre, pra atribuir depois em Tratativas, onde um EC também pode virar
+ * N linhas de unidades diferentes via "Desmembrar"). Unidade é resolvida
+ * pelos apelidos cadastrados (igual outros importadores); Motivo precisa
+ * bater com um nome já cadastrado no catálogo (ignorando maiúsculas/
+ * acentos) — o que não bate fica de fora só daquele campo, sem travar a
+ * linha inteira. Todo EC importado entra como `pendente`. Avisa (não
+ * bloqueia) quando o número do chamado já existe no banco, pra não
+ * reimportar a mesma planilha sem querer. O cadastro de Motivos (admin)
+ * mora aqui — mais perto do fluxo de "cheguei uma planilha nova" do que da
+ * tela de Tratativas.
  */
 export function ImportacaoEcTab({ ecsExistentes, unidades, motivos, isAdmin, onImportado, onMotivosAtualizados }: ImportacaoEcTabProps) {
   const { user, role } = useAuth()
@@ -65,13 +78,39 @@ export function ImportacaoEcTab({ ecsExistentes, unidades, motivos, isAdmin, onI
     [linhas, chamadosExistentes],
   )
 
+  // Resolve unidade/motivo por linha (null quando a planilha não trouxe a
+  // coluna, ou quando o texto não bateu com nada cadastrado).
+  const linhasResolvidas = useMemo(
+    () => linhas.map(l => ({
+      ...l,
+      unidadeResolvida: l.unidadeNomeOriginal ? resolverUnidadeFlexivel(l.unidadeNomeOriginal, unidades)?.codigo ?? null : null,
+      motivoResolvido: l.motivoOriginal ? resolverMotivo(l.motivoOriginal, motivos)?.nome ?? null : null,
+    })),
+    [linhas, unidades, motivos],
+  )
+
+  const unidadesNaoReconhecidas = useMemo(
+    () => Array.from(new Set(
+      linhasResolvidas.filter(l => l.unidadeNomeOriginal && !l.unidadeResolvida).map(l => l.unidadeNomeOriginal as string),
+    )),
+    [linhasResolvidas],
+  )
+  const motivosNaoReconhecidos = useMemo(
+    () => Array.from(new Set(
+      linhasResolvidas.filter(l => l.motivoOriginal && !l.motivoResolvido).map(l => l.motivoOriginal as string),
+    )),
+    [linhasResolvidas],
+  )
+
   async function handleImportar() {
-    const registros = linhas.map(l => ({
+    const registros = linhasResolvidas.map(l => ({
       data: l.data,
       descricao_original: l.descricaoOriginal,
       numero_chamado: l.numeroChamado,
       solicitante: l.solicitante,
       valor: l.valor,
+      unidade: l.unidadeResolvida,
+      motivo: l.motivoResolvido,
       status: 'pendente',
       tem_evidencia: true, // já entra flegado — a maioria tem evidência anexada no chamado do Drive; admin desmarca na exceção
       criado_por_email: user?.email ?? null,
@@ -86,7 +125,13 @@ export function ImportacaoEcTab({ ecsExistentes, unidades, motivos, isAdmin, onI
         const { error } = await supabase.from('encontro_contas').insert(batch)
         if (error) throw new Error(error.message)
       }
-      toast({ title: `${registros.length} EC(s) importado(s)`, description: 'Todos entraram como Pendente — atribua a unidade em Tratativas.' })
+      const comUnidade = registros.filter(r => r.unidade !== null).length
+      toast({
+        title: `${registros.length} EC(s) importado(s)`,
+        description: comUnidade > 0
+          ? `${comUnidade} já entraram com a unidade da planilha. O restante fica Pendente — atribua em Tratativas.`
+          : 'Todos entraram como Pendente — atribua a unidade em Tratativas.',
+      })
       setFile(null)
       setLinhas([])
       setErrosParse([])
@@ -157,9 +202,9 @@ export function ImportacaoEcTab({ ecsExistentes, unidades, motivos, isAdmin, onI
       </div>
       <p className="text-sm text-muted-foreground">
         Planilha com as colunas Data, Descrição e Valor — a Descrição precisa seguir o padrão
-        "EC - &lt;chamado&gt; - &lt;nome de quem abriu&gt;" (ex: "EC - R14602322 - Vinicius Etges Silveira"). Todo EC
-        importado entra como Pendente, sem unidade — atribua depois na aba Tratativas (um EC de mais de uma unidade
-        pode ser desmembrado lá).
+        "EC - &lt;chamado&gt; - &lt;nome de quem abriu&gt;" (ex: "EC - R14602322 - Vinicius Etges Silveira"). Colunas
+        "Unidade" e "Motivo" são opcionais — se vierem preenchidas, o EC já entra com elas; senão fica Pendente, sem
+        unidade, pra atribuir depois na aba Tratativas (um EC de mais de uma unidade pode ser desmembrado lá).
       </p>
 
       <div className="flex flex-wrap items-end gap-3">
@@ -183,6 +228,30 @@ export function ImportacaoEcTab({ ecsExistentes, unidades, motivos, isAdmin, onI
           </p>
           <ul className="max-h-32 space-y-0.5 overflow-y-auto font-mono">
             {possiveisDuplicatas.map(c => <li key={c}>{c}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {unidadesNaoReconhecidas.length > 0 && (
+        <div className="rounded-lg border border-amber-300/50 bg-amber-50 p-3 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400">
+          <p className="mb-1 font-semibold">
+            {unidadesNaoReconhecidas.length} unidade(s) da coluna "Unidade" não foram reconhecidas (cadastre um apelido em
+            Administração se o nome vier diferente) — esses EC(s) importam sem unidade, pra atribuir em Tratativas:
+          </p>
+          <ul className="max-h-32 space-y-0.5 overflow-y-auto font-mono">
+            {unidadesNaoReconhecidas.map(u => <li key={u}>{u}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {motivosNaoReconhecidos.length > 0 && (
+        <div className="rounded-lg border border-amber-300/50 bg-amber-50 p-3 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400">
+          <p className="mb-1 font-semibold">
+            {motivosNaoReconhecidos.length} motivo(s) da coluna "Motivo" não batem com nenhum do catálogo (cadastre em
+            "Motivos" acima, ou corrija o nome na planilha) — esses EC(s) importam sem motivo:
+          </p>
+          <ul className="max-h-32 space-y-0.5 overflow-y-auto font-mono">
+            {motivosNaoReconhecidos.map(m => <li key={m}>{m}</li>)}
           </ul>
         </div>
       )}

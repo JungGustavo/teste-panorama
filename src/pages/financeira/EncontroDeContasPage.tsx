@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, FolderOpen } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Toaster } from '@/components/ui/toaster'
 import { useAuth } from '@/context/AuthContext'
@@ -10,11 +11,15 @@ import { TratativasTab } from '@/components/financeira/encontro-contas/Tratativa
 import { HistoricoEcTab } from '@/components/financeira/encontro-contas/HistoricoEcTab'
 import { ImportacaoEcTab } from '@/components/financeira/encontro-contas/ImportacaoEcTab'
 
+const LINK_DRIVE_EVIDENCIAS = 'https://drive.google.com/drive/folders/1m9dI4IIpFP1iFBtL8zhqG7mHLdWlF37g'
+
 /**
  * Encontro de Contas — /area-financeira/encontro-de-contas. Controle dos
  * descontos (ECs) que a Ambev lança via chamado: importação da planilha,
  * tratativa por unidade, validação do financeiro (mesmo fluxo do Plano de
- * Ação — ver `src/lib/encontro-contas.ts`) e dashboard gerencial.
+ * Ação — ver `src/lib/encontro-contas.ts`) e dashboard gerencial. O botão
+ * "Evidências" abre, numa aba nova, a pasta do Drive onde ficam os
+ * comprovantes dos descontos (fora do app, mantida à mão por fora).
  */
 export function EncontroDeContasPage() {
   const { role } = useAuth()
@@ -25,16 +30,24 @@ export function EncontroDeContasPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Link
-          to="/area-financeira"
-          className="flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ChevronLeft className="h-4 w-4" />
-          Área Financeira
-        </Link>
-        <span className="text-muted-foreground/40">/</span>
-        <h2 className="text-base font-semibold text-foreground">Encontro de Contas</h2>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Link
+            to="/area-financeira"
+            className="flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            Área Financeira
+          </Link>
+          <span className="text-muted-foreground/40">/</span>
+          <h2 className="text-base font-semibold text-foreground">Encontro de Contas</h2>
+        </div>
+        <Button variant="outline" size="sm" asChild className="gap-2">
+          <a href={LINK_DRIVE_EVIDENCIAS} target="_blank" rel="noopener noreferrer">
+            <FolderOpen className="h-4 w-4" />
+            Evidências (Drive)
+          </a>
+        </Button>
       </div>
 
       <Tabs defaultValue="dashboard">

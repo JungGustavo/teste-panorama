@@ -3,12 +3,16 @@ import { AlertTriangle, CheckCircle2, Clock, PlayCircle } from 'lucide-react'
 import { useUltimoFollowPorPlano } from '@/hooks/usePlanosAcao'
 import { STATUS_LABEL, STATUS_PILL, STATUS_ORDEM, estaAtrasado, formatDataBr } from '@/lib/plano-acao'
 import { cn } from '@/lib/utils'
-import type { PlanoAcao } from '@/types'
+import type { PlanoAcao, PlanoAcaoTag } from '@/types'
 
 interface Props {
   /** Planos já escopados pela RLS (admin vê tudo, unidade só os próprios) — filtragem por unidade é feita aqui. */
   planos: PlanoAcao[]
+  /** Catálogo de tags — usado só pra excluir ações tagueadas como "SDG Gerentes" (ver `tagsGerentes` abaixo), esse slide é do SDG Financeiro. */
+  tags: PlanoAcaoTag[]
   unidadeSel: string
+  /** CONS (padrão) | ROTA | ARM | EMP — negócio selecionado no cabeçalho da apresentação; ações CONS aparecem sempre, as de negócio específico (ex: CDR) só pro negócio selecionado (unidade com 2 gerentes reais, ver migration_133). */
+  negocio: string
 }
 
 /**
@@ -17,8 +21,21 @@ interface Props {
  * lista com prazo e o último Follow ao lado, pra cobrar justificativa ao
  * vivo na reunião de quem ainda não avançou.
  */
-export function SlidePlanoAcao({ planos, unidadeSel }: Props) {
-  const planosUnidade = useMemo(() => planos.filter(p => p.unidade === unidadeSel), [planos, unidadeSel])
+export function SlidePlanoAcao({ planos, tags, unidadeSel, negocio }: Props) {
+  // Tags "SDG Gerentes · X" (ver `SDG_INDICADORES_GERENTES`) são exclusivas
+  // do outro deck (`SlidePlanoAcaoGerentes.tsx`) — esse slide (SDG
+  // Financeiro) não deve listar ações delas, mesmo que sejam da mesma
+  // unidade/negócio.
+  const tagsGerentes = useMemo(
+    () => new Set(tags.filter(t => t.sdg_indicador?.startsWith('gerentes-')).map(t => t.nome)),
+    [tags],
+  )
+  const planosUnidade = useMemo(
+    () => planos.filter(p =>
+      p.unidade === unidadeSel && (p.negocio === 'CONS' || p.negocio === negocio) && !tagsGerentes.has(p.tag),
+    ),
+    [planos, unidadeSel, negocio, tagsGerentes],
+  )
 
   const ativos = useMemo(
     () => planosUnidade

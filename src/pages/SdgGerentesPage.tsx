@@ -7,6 +7,8 @@ import { useData } from '@/context/DataContext'
 import { useTheme } from '@/hooks/useTheme'
 import { useSdgJustificativas } from '@/hooks/useSdgJustificativas'
 import { useRelatosSeguranca } from '@/hooks/useRelatosSeguranca'
+import { useAcidentesSeguranca } from '@/hooks/useAcidentesSeguranca'
+import { acidenteParaRelato } from '@/lib/piramide-seguranca'
 import { disponibilidadesDaUnidade } from '@/lib/farol-gerentes'
 import { usePlanoAcaoTags, usePlanosAcao } from '@/hooks/usePlanosAcao'
 import { mapaLogosPorUnidade } from '@/lib/logos-unidades'
@@ -114,6 +116,14 @@ export function SdgGerentesPage() {
   // "resumo combinado" dos dois gerentes, cada um só vê o próprio).
   const { porIndicador: justificativas, loading: loadingJustificativas } = useSdgJustificativas(selUnidade, selAno, selMes, selNegocio)
   const { relatos, loading: loadingRelatos } = useRelatosSeguranca(selUnidade, selAno)
+  // Acidentes (migration 134) soma na mesma Pirâmide de Segurança — convertido
+  // pro formato de RelatoSeguranca (ver acidenteParaRelato) só em memória,
+  // nunca gravado em relatos_seguranca.
+  const { acidentes, loading: loadingAcidentes } = useAcidentesSeguranca(selUnidade, selAno)
+  const relatosComAcidentes = useMemo(
+    () => [...relatos, ...acidentes.map(acidenteParaRelato)],
+    [relatos, acidentes],
+  )
   // Só pro slide final "Plano de Ação" — mesmas tabelas/RLS já usadas em
   // Área Financeira > Plano de Ação, independentes do loading geral.
   const { planos } = usePlanosAcao()
@@ -165,7 +175,7 @@ export function SdgGerentesPage() {
   // unidade selecionada, filtrado em memória do cache global (`rowsAux`).
   const rowsPerdasAux = useMemo(() => rowsAux.filter(r => r.unidade === selUnidade), [rowsAux, selUnidade])
 
-  const loading = loadingDados || loadingJustificativas || loadingRelatos
+  const loading = loadingDados || loadingJustificativas || loadingRelatos || loadingAcidentes
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -347,7 +357,7 @@ export function SdgGerentesPage() {
               <SlideResumoExecutivoGerentes justificativa={justificativas['assuntos-gerais-gerentes']} />
             )}
             {slideIdx === 2 && (
-              <SlidePiramideSeguranca relatos={relatos} ano={selAno} mes={selMes} />
+              <SlidePiramideSeguranca relatos={relatosComAcidentes} ano={selAno} mes={selMes} />
             )}
             {slideIdx === 3 && (
               <SlideMetasBonusGerentes
@@ -392,7 +402,7 @@ export function SdgGerentesPage() {
               <SlideScoreCardGerentes />
             )}
             {slideIdx === 13 && (
-              <SlidePlanoAcaoGerentes planos={planos} tags={tagsPlanoAcao} unidadeSel={selUnidade} />
+              <SlidePlanoAcaoGerentes planos={planos} tags={tagsPlanoAcao} unidadeSel={selUnidade} negocio={selNegocio} />
             )}
           </>
         )}

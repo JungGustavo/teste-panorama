@@ -591,6 +591,8 @@ export type PlanoAcaoStatus = 'pendente' | 'em_andamento' | 'concluido' | 'valid
 export interface PlanoAcao {
   id: string
   unidade: string
+  /** CONS (padrão) ou o negócio específico (ROTA/ARM/EMP) — unidades com 2 gerentes reais (Camaçari: CDL=Rota/CDR=Armazém; Ponta Grossa: Empurrada/Armazém) podem marcar a ação como sendo só de um negócio, ver migration_133. CONS = visível pros dois. */
+  negocio: string
   titulo: string
   descricao: string
   responsavel: string
@@ -1164,9 +1166,44 @@ export interface RelatoSeguranca {
   mes: number
   classificacao: string
   sif: boolean
-  /** Texto original da coluna SIF (ex: "SIF PERCUSOR") — null quando não é SIF ou quando importado antes da migration 120. */
+  /** Texto original da coluna SIF (ex: "SIF PERCUSOR"/"SIF PRECURSOR") — null quando não é SIF ou quando importado antes da migration 120. */
   sif_tipo: string | null
   tipo_relato: string | null
   /** Texto livre da ocorrência (coluna DETALHAMENTO da planilha) — usado na tabela de eventos graves/SIF do slide da Pirâmide. */
   detalhamento: string | null
+  /**
+   * De onde essa linha veio — só existe em memória (nunca é coluna do
+   * banco): linha de `relatos_seguranca` fica `undefined` (trata como
+   * 'relato'); linha mapeada de `acidentes_seguranca` (migration 134, ver
+   * `acidenteParaRelato` em piramide-seguranca.ts) vem como 'acidente'. A
+   * regra de "quando entra na lista de eventos graves" (`eventosGraves`)
+   * é diferente conforme a origem.
+   */
+  origem?: 'relato' | 'acidente'
+}
+
+/**
+ * Acidente de segurança (migration 134) — segundo relatório do GInfo
+ * (além de `relatos_seguranca`), que soma na mesma Pirâmide de Segurança
+ * do SDG Gerentes. `tipo` é o valor cru da coluna TIPO da planilha (ex:
+ * "INCIDENTES", "FAI", "LTI") — ver `acidenteParaRelato` em
+ * piramide-seguranca.ts pra como vira uma "classificação" da pirâmide.
+ */
+export interface AcidenteSeguranca {
+  id?: string
+  /** ID da linha na planilha de origem (coluna "NÚMERO CREDIT") — chave de upsert. */
+  numero_credit: number
+  unidade: string
+  data_ocorrencia: string
+  ano: number
+  mes: number
+  tipo: string
+  sif: boolean
+  /** Texto original da coluna SIF (ex: "SIF POTENCIAL"/"SIF PRECURSOR") — null quando "NOT SIF". */
+  sif_tipo: string | null
+  colaborador: string | null
+  funcao: string | null
+  ato: string | null
+  /** Texto livre da ocorrência (coluna OCORRENCIA) — mesmo papel do `detalhamento` dos relatos. */
+  ocorrencia: string | null
 }

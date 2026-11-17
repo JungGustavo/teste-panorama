@@ -73,8 +73,14 @@ describe('modelos são lidos pelos parsers das telas', () => {
     const { linhas, erros } = await parseEncontroContasFile(arquivo)
     expect(erros).toEqual([])
     expect(linhas).toEqual([
-      { data: '2026-01-15', descricaoOriginal: 'EC - R14602322 - Vinicius Etges Silveira', numeroChamado: 'R14602322', solicitante: 'Vinicius Etges Silveira', valor: 1234.56 },
-      { data: '2026-01-22', descricaoOriginal: 'EC - R14611087 - Ana Paula Ferreira', numeroChamado: 'R14611087', solicitante: 'Ana Paula Ferreira', valor: 850 },
+      {
+        data: '2026-01-15', descricaoOriginal: 'EC - R14602322 - Vinicius Etges Silveira', numeroChamado: 'R14602322', solicitante: 'Vinicius Etges Silveira', valor: 1234.56,
+        unidadeNomeOriginal: 'diadema', motivoOriginal: 'vale financeiro',
+      },
+      {
+        data: '2026-01-22', descricaoOriginal: 'EC - R14611087 - Ana Paula Ferreira', numeroChamado: 'R14611087', solicitante: 'Ana Paula Ferreira', valor: 850,
+        unidadeNomeOriginal: null, motivoOriginal: null,
+      },
     ])
   })
 

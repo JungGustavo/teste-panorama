@@ -12,7 +12,10 @@ describe('parseEncontroContasMatriz', () => {
     const { linhas, erros } = parseEncontroContasMatriz(matriz)
     expect(erros).toEqual([])
     expect(linhas).toEqual([
-      { data: '2026-03-15', descricaoOriginal: 'EC - R14602322 - Vinicius Etges Silveira', numeroChamado: 'R14602322', solicitante: 'Vinicius Etges Silveira', valor: 1500.5 },
+      {
+        data: '2026-03-15', descricaoOriginal: 'EC - R14602322 - Vinicius Etges Silveira', numeroChamado: 'R14602322', solicitante: 'Vinicius Etges Silveira', valor: 1500.5,
+        unidadeNomeOriginal: null, motivoOriginal: null,
+      },
     ])
   })
 
@@ -41,7 +44,10 @@ describe('parseEncontroContasMatriz', () => {
       ['16/03/2026', 'EC - R2 - Ciclana', 200],
     ]
     const { linhas, erros } = parseEncontroContasMatriz(matriz)
-    expect(linhas).toEqual([{ data: '2026-03-16', descricaoOriginal: 'EC - R2 - Ciclana', numeroChamado: 'R2', solicitante: 'Ciclana', valor: 200 }])
+    expect(linhas).toEqual([{
+      data: '2026-03-16', descricaoOriginal: 'EC - R2 - Ciclana', numeroChamado: 'R2', solicitante: 'Ciclana', valor: 200,
+      unidadeNomeOriginal: null, motivoOriginal: null,
+    }])
     expect(erros).toHaveLength(1)
   })
 
@@ -67,5 +73,32 @@ describe('parseEncontroContasMatriz', () => {
 
   it('retorna vazio pra matriz vazia', () => {
     expect(parseEncontroContasMatriz([])).toEqual({ linhas: [], erros: [] })
+  })
+
+  it('lê as colunas opcionais Unidade e Motivo quando presentes na planilha', () => {
+    const matriz = [
+      ['DATA', 'DESCRICAO', 'VALOR', 'unidade', 'motivo'],
+      ['15/03/2026', 'EC - R1 - Fulano', 100, 'diadema', 'vale financeiro'],
+    ]
+    const { linhas } = parseEncontroContasMatriz(matriz)
+    expect(linhas[0].unidadeNomeOriginal).toBe('diadema')
+    expect(linhas[0].motivoOriginal).toBe('vale financeiro')
+  })
+
+  it('unidade/motivo ficam null quando a planilha não tem essas colunas (comportamento de sempre)', () => {
+    const matriz = [HEADER, ['15/03/2026', 'EC - R1 - Fulano', 100]]
+    const { linhas } = parseEncontroContasMatriz(matriz)
+    expect(linhas[0].unidadeNomeOriginal).toBeNull()
+    expect(linhas[0].motivoOriginal).toBeNull()
+  })
+
+  it('unidade/motivo ficam null quando a coluna existe mas a célula está vazia nessa linha', () => {
+    const matriz = [
+      ['DATA', 'DESCRICAO', 'VALOR', 'unidade', 'motivo'],
+      ['15/03/2026', 'EC - R1 - Fulano', 100, '', ''],
+    ]
+    const { linhas } = parseEncontroContasMatriz(matriz)
+    expect(linhas[0].unidadeNomeOriginal).toBeNull()
+    expect(linhas[0].motivoOriginal).toBeNull()
   })
 })

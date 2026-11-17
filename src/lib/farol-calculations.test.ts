@@ -18,6 +18,8 @@ import {
   metaPorPrefixoAvo,
   normalizarParaCalculo,
   somaRealAnoAnteriorComMedia,
+  calcularExclusaoUnidadesNovas,
+  unidadeNovaNoAno,
 } from './farol-calculations'
 
 /**
@@ -319,6 +321,18 @@ describe('somaRealAnoAnteriorComMedia', () => {
     ]
     expect(somaRealAnoAnteriorComMedia(rowsNegocio, '2027-07-01', 2027, ['217'], [1, 2])).toBe(3000) // jan+fev = 2x a média (1500 cada)
   })
+
+  it('ano <= 2025 (numeração antiga): traduz o código antes de comparar com `contas` (numeração atual) — sem isso, zerava o ano anterior pra qualquer conta >= 035', () => {
+    // conta ATUAL 218 (Despesas Frota Leve) = conta ANTIGA 217 pra ano <= 2025 (ver codigoDreNumeracaoAtual).
+    const rowsNegocio: DreLongoRow[] = [linhaAno(2025, '217', 1, -5000), linhaAno(2025, '217', 2, -6000)]
+    expect(somaRealAnoAnteriorComMedia(rowsNegocio, null, 2025, ['218'], [1])).toBe(5000)
+    expect(somaRealAnoAnteriorComMedia(rowsNegocio, null, 2025, ['218'], [1, 2])).toBe(11000)
+  })
+
+  it('ano <= 2025, intervalo desde o mês 1: também traduz o código no atalho do ACUMULADO_ANO', () => {
+    const rowsNegocio: DreLongoRow[] = [linhaAcumulado(2025, '217', 2, -2050)]
+    expect(somaRealAnoAnteriorComMedia(rowsNegocio, null, 2025, ['218'], [1, 2])).toBe(2050)
+  })
 })
 
 describe('calcularSerieReducaoCustos', () => {
@@ -364,6 +378,19 @@ describe('calcularSerieReducaoCustos', () => {
       { dataEntrada: '2026-03-01', rows: unidadeNova },
     ])
     expect(serie).toEqual([{ mes: 1, avr: 3000, meta: (4000 + 1000) * 0.85 }])
+  })
+
+  it('unidade que entrou DENTRO do próprio ano (sem ano anterior) tem seu realizado subtraído do consolidado — não penaliza a meta da AMBEV', () => {
+    const rowsNegocio: DreLongoRow[] = [
+      linhaAno(2026, '217', 1, -4000),
+      linhaAno(2027, '217', 1, -3000), // AMBEV consolidado de 2027 já inclui os -500 da unidade nova
+    ]
+    // unidade nova em 2027 (o próprio ano, não o anterior): sem base nenhuma pra comparar.
+    const unidadeNovaEsteAno: DreLongoRow[] = [linhaAno(2027, '217', 1, -500)]
+    const serie = calcularSerieReducaoCustos(rowsNegocio, null, 2027, ['217'], [
+      { dataEntrada: '2027-01-01', rows: unidadeNovaEsteAno },
+    ])
+    expect(serie).toEqual([{ mes: 1, avr: 2500, meta: 3400 }]) // 3000 - 500 (excluído); meta = 4000*0.85
   })
 })
 
@@ -849,6 +876,49 @@ describe('calcularEvolucaoReducaoCustos', () => {
     ])
     expect(semIncremento.meses[0].resultado.realAnterior).toBeCloseTo(5000, 2)
     expect(comIncremento.meses[0].resultado.realAnterior).toBeCloseTo(6000, 2) // +1000 de incremento (média jan, antes da entrada em mar)
+  })
+
+  it('unidade nova DENTRO do próprio ano tem o realizado subtraído do mês e do acumulado anual da AMBEV', () => {
+    const rowsAmbev: DreLongoRow[] = [
+      linhaAno(2026, '217', 1, -5000),
+      linhaAno(2027, '217', 1, -4000), // já inclui os -300 da unidade nova
+    ]
+    const unidadeNovaEsteAno: DreLongoRow[] = [linhaAno(2027, '217', 1, -300)]
+    const evolucao = calcularEvolucaoReducaoCustos(rowsAmbev, null, 2027, ['217'], [
+      { dataEntrada: '2027-01-01', rows: unidadeNovaEsteAno },
+    ])
+    expect(evolucao.meses[0].resultado.realAtual).toBeCloseTo(3700, 2) // 4000 - 300
+    expect(evolucao.anual?.realAtual).toBeCloseTo(3700, 2)
+  })
+})
+
+describe('unidadeNovaNoAno', () => {
+  it('true quando a unidade entrou dentro do ano informado', () => {
+    expect(unidadeNovaNoAno('2027-05-01', 2027)).toBe(true)
+  })
+
+  it('false quando entrou em ano anterior (já tem base pra comparar, mesmo que parcial)', () => {
+    expect(unidadeNovaNoAno('2026-05-01', 2027)).toBe(false)
+  })
+
+  it('false sem data_entrada', () => {
+    expect(unidadeNovaNoAno(null, 2027)).toBe(false)
+  })
+})
+
+describe('calcularExclusaoUnidadesNovas', () => {
+  it('soma o real do ano só das unidades que entraram DENTRO desse ano', () => {
+    const unidadeNova: DreLongoRow[] = [linhaAno(2027, '217', 1, -500)]
+    const unidadeAntiga: DreLongoRow[] = [linhaAno(2027, '217', 1, -900)] // entrou em 2026, não conta
+    const exclusao = calcularExclusaoUnidadesNovas(
+      [{ dataEntrada: '2027-01-01', rows: unidadeNova }, { dataEntrada: '2026-01-01', rows: unidadeAntiga }],
+      2027, ['217'], [1],
+    )
+    expect(exclusao).toBe(500)
+  })
+
+  it('lista vazia retorna 0', () => {
+    expect(calcularExclusaoUnidadesNovas([], 2027, ['217'], [1])).toBe(0)
   })
 })
 

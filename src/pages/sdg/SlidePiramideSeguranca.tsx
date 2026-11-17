@@ -177,7 +177,7 @@ export function SlidePiramideSeguranca({ relatos, ano, mes }: Props) {
         {eventos.length > 0 && (
           <TableCard
             titulo="Eventos graves do mês"
-            subtitulo={`${MES_ABREV[mes - 1]}/${ano} — Fatal (sempre) ou Incidente/LTI/MDI/FAI/MTI marcados como SIF Percusor/Potencial`}
+            subtitulo={`${MES_ABREV[mes - 1]}/${ano} — Fatal (sempre) ou Incidente/LTI/MDI/FAI/MTI marcados como SIF Precursor/Potencial (Relatos); Incidente com SIF Potencial ou qualquer outro tipo (Acidentes)`}
           >
             <Table>
               <TableHeader>

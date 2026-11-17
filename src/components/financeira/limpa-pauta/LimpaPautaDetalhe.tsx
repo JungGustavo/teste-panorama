@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
+import { Loader2, Trash2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -51,9 +53,14 @@ function formatStatusFreightech(status: string): string {
  * `isAdmin` troca os campos editáveis (Select/Input) por texto estático
  * pra quem não é (a RLS de UPDATE já bloqueia a escrita de qualquer forma,
  * isso aqui é só pra não oferecer um campo que vai falhar ao salvar).
+ *
+ * "Excluir pauta" (admin) apaga esse registro específico — pra desfazer uma
+ * linha que subiu errada na importação. `onAtualizado` recarrega a lista do
+ * pai, que some com o registro e fecha o dialog automaticamente.
  */
 export function LimpaPautaDetalhe({ registro, unidades, onAtualizado, isAdmin }: LimpaPautaDetalheProps) {
   const { toast } = useToast()
+  const [excluindo, setExcluindo] = useState(false)
   const nomeUnidade = unidades.find(u => u.codigo === registro.unidade)?.nome ?? registro.unidade
 
   const [justificativas, setJustificativas] = useState({
@@ -70,6 +77,16 @@ export function LimpaPautaDetalhe({ registro, unidades, onAtualizado, isAdmin }:
     setObservacao(registro.observacao)
     setValorPagoTexto(registro.valor_pago.toFixed(2).replace('.', ','))
   }, [registro.id, registro.justificativa_god, registro.justificativa_geo, registro.justificativa_rpo, registro.observacao, registro.valor_pago])
+
+  async function handleExcluir() {
+    if (!window.confirm(`Excluir essa linha da pauta (${registro.categoria}, ${nomeUnidade})? Essa ação não pode ser desfeita.`)) return
+
+    setExcluindo(true)
+    const { error } = await supabase.from('limpa_pauta').delete().eq('id', registro.id)
+    if (error) { toast({ title: 'Erro ao excluir', description: error.message, variant: 'destructive' }); setExcluindo(false); return }
+    toast({ title: 'Linha excluída' })
+    onAtualizado()
+  }
 
   async function handleCampo(campo: string, valor: unknown) {
     const { error } = await supabase.from('limpa_pauta').update({ [campo]: valor }).eq('id', registro.id)
@@ -101,11 +118,19 @@ export function LimpaPautaDetalhe({ registro, unidades, onAtualizado, isAdmin }:
 
   return (
     <div className="space-y-6">
-      <div className="space-y-1">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          {MESES_NOMES[registro.mes - 1]}/{registro.ano} · {registro.segmento}
-        </p>
-        <h3 className="text-xl font-semibold text-foreground">{registro.categoria}</h3>
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {MESES_NOMES[registro.mes - 1]}/{registro.ano} · {registro.segmento}
+          </p>
+          <h3 className="text-xl font-semibold text-foreground">{registro.categoria}</h3>
+        </div>
+        {isAdmin && (
+          <Button variant="destructive" size="sm" onClick={handleExcluir} disabled={excluindo} className="shrink-0 gap-2">
+            {excluindo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            Excluir pauta
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/40 p-4 sm:grid-cols-4">

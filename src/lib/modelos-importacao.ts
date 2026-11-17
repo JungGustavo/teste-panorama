@@ -101,9 +101,9 @@ export const MODELO_ENCONTRO_CONTAS: AbaModelo[] = [
   {
     nome: 'Encontro de Contas',
     linhas: [
-      ['DATA', 'DESCRICAO', 'VALOR'],
-      ['15/01/2026', 'EC - R14602322 - Vinicius Etges Silveira', '1234,56'],
-      ['22/01/2026', 'EC - R14611087 - Ana Paula Ferreira', '850,00'],
+      ['DATA', 'DESCRICAO', 'VALOR', 'unidade', 'motivo'],
+      ['15/01/2026', 'EC - R14602322 - Vinicius Etges Silveira', '1234,56', 'diadema', 'vale financeiro'],
+      ['22/01/2026', 'EC - R14611087 - Ana Paula Ferreira', '850,00', '', ''],
     ],
   },
 ]
